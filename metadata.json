@@ -1,0 +1,6 @@
+{
+  "name": "Smart Attendance System",
+  "description": "Smart Attendance QR, Face & GPS verification systems with Telegram logs",
+  "requestFramePermissions": ["camera", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
