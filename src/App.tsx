@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { QRCodeSVG } from "qrcode.react";
+// @ts-ignore
+import umeLogo from "./UME Logo.png";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Fingerprint,
@@ -153,6 +156,11 @@ export default function App() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   });
+
+  // QR Code Feature States
+  const [isQRBadgeOpen, setIsQRBadgeOpen] = useState(false);
+  const [gateScanType, setGateScanType] = useState<"Check-In" | "Check-Out">("Check-In");
+  const [selectedGateEmpId, setSelectedGateEmpId] = useState("");
 
   // Real webcam camera streams
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -398,6 +406,56 @@ export default function App() {
       "success",
       "ស្កែនវត្តមានជោគជ័យ",
       `បុគ្គលិក៖ ${loggedInEmployee.name} (${loggedInEmployee.dept})\nប្រភេទ៖ ${type}\nម៉ោង៖ ${checkTimeStr}\nស្ថានភាព៖ ${status}\nចម្ងាយពីក្រុមហ៊ុន៖ ${calculatedDistance} ម៉ែត្រ`
+    );
+  };
+
+  // Generalized QR Code Scanner (Personal Badge Gate scan or Admin simulation)
+  const executeEmployeeQRScanner = (
+    emp: Employee,
+    type: "Check-In" | "Check-Out",
+    method: "QR Code" | "Face Scan" = "QR Code",
+    distStr: string = "0m"
+  ) => {
+    if (!emp) return;
+
+    const now = new Date();
+    const hour = now.getHours();
+    const min = now.getMinutes();
+    const checkTimeStr = now.toLocaleTimeString("km-KH", { hour12: false });
+    const dateStr = now.toISOString().split("T")[0];
+
+    let status = "ទាន់ម៉ោង";
+    if (type === "Check-In") {
+      const [targetHour, targetMin] = office.inTime.split(":").map(Number);
+      if (hour > targetHour || (hour === targetHour && min > targetMin)) {
+        status = "យឺតយ៉ាវ";
+      }
+    } else {
+      status = "ចេញធ្វើការ";
+    }
+
+    const newLog: LogEntry = {
+      id: emp.id,
+      name: emp.name,
+      dept: emp.dept,
+      type: type,
+      time: `${dateStr} ${checkTimeStr}`,
+      scanMethod: method,
+      distance: distStr,
+      status: status,
+    };
+
+    setLogs((prev) => [newLog, ...prev]);
+
+    // Push bot message report
+    triggerTelegramNotification(newLog);
+
+    triggerDialog(
+      "success",
+      `ស្កែន QR កូដជោគជ័យ (${type})`,
+      `បុគ្គលិក៖ ${emp.name} (${emp.dept})\nប្រភេទ៖ ${type}\nម៉ោង៖ ${checkTimeStr}\nវិធីស្កែន៖ ${
+        method === "QR Code" ? "បង្ហាញ QR ផ្ទាល់ខ្លួនទៅឧបករណ៍ស្កែន" : "ស្កែន QR ក្រុមហ៊ុនលើទូរស័ព្ទ"
+      }\nស្ថានភាពទទួលបាន៖ ${status}`
     );
   };
 
@@ -1085,8 +1143,13 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 py-3.5 flex flex-col sm:flex-row justify-between items-center gap-3.5">
           {/* Logo Title */}
           <div className="flex items-center space-x-3.5">
-            <div className="bg-emerald-500 p-2.5 rounded-xl text-white shadow-lg shadow-emerald-500/25 animate-pulse">
-              <Fingerprint className="w-6 h-6" />
+            <div className="bg-white p-1 rounded-xl shadow-lg shadow-black/15 flex items-center justify-center">
+              <img 
+                src={umeLogo} 
+                alt="UME Logo" 
+                className="w-11 h-11 object-contain rounded-lg" 
+                referrerPolicy="no-referrer" 
+              />
             </div>
             <div>
               <h1 className="font-bold text-lg leading-tight tracking-tight flex items-center gap-1.5 font-sans">
@@ -1338,7 +1401,30 @@ export default function App() {
                 </div>
 
                 {/* Simulated Geofencing Range status */}
-                <div className="flex-1 overflow-y-auto space-y-3.5" style={{ scrollbarWidth: "none" }}>
+                <div className="flex-1 overflow-y-auto space-y-3.5 animate-fade-in" style={{ scrollbarWidth: "none" }}>
+                  {/* Personal QR ID Card Trigger Banner */}
+                  <div className="bg-gradient-to-r from-emerald-500/15 via-indigo-500/5 to-emerald-500/5 p-3 rounded-2xl border border-emerald-500/20 flex items-center justify-between shadow-sm">
+                    <div className="flex items-center space-x-2.5">
+                      <div className="bg-emerald-500 p-2.5 rounded-xl text-white shadow-md shadow-emerald-500/20">
+                        <QrCode className="w-4 h-4 animate-pulse" />
+                      </div>
+                      <div>
+                        <h4 className="text-[11px] font-bold text-white leading-tight">កាតបុគ្គលិក QR ឌីជីថល</h4>
+                        <p className="text-[9px] text-slate-300">ស្កែនយកវត្តមាននៅច្រកទ្វារ</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsQRBadgeOpen(true);
+                        setSelectedGateEmpId(loggedInEmployee.id);
+                      }}
+                      className="bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white font-bold text-[9.5px] px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow shadow-emerald-500/10"
+                    >
+                      <IdCard className="w-3.5 h-3.5" />
+                      បង្ហាញកាត
+                    </button>
+                  </div>
+
                   <div className="bg-slate-900/90 p-3.5 rounded-2xl border border-slate-800/80 space-y-2.5">
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] text-slate-400 font-semibold tracking-wide">ស្ថានភាពទីតាំង (GPS Geofence)</span>
@@ -1448,10 +1534,41 @@ export default function App() {
 
                     {/* QR alignment frame */}
                     {scanMethod === "qr" && !isRealCameraActive && (
-                      <div className="z-10 text-center p-3 space-y-1">
-                        <QrCode className="w-10 h-10 text-emerald-400 animate-pulse mx-auto mb-1.5" />
-                        <p className="text-[10px] text-slate-300 font-medium">ស្វែងរកកូដ QR...</p>
-                        <p className="text-[9px] text-slate-500 max-w-xs mx-auto">សូមតម្រង់កូដ QR ក្រុមហ៊ុនរបស់អ្នកទៅកាន់កាមេរ៉ា</p>
+                      <div className="z-10 text-center p-3 space-y-2">
+                        <QrCode className="w-10 h-10 text-emerald-400 animate-pulse mx-auto mb-1" />
+                        <p className="text-[10px] text-slate-300 font-semibold">ស្វែងរកកូដ QR ក្រុមហ៊ុន...</p>
+                        <p className="text-[9px] text-slate-500 max-w-[210px] mx-auto leading-normal">សូមតម្រង់កូដ QR ការិយាល័យទៅកាន់កាមេរ៉ាក្នុងទូរស័ព្ទដៃរបស់លោកអ្នក</p>
+                        <div className="pt-1.5">
+                          <button
+                            onClick={() => {
+                              if (!loggedInEmployee) {
+                                triggerDialog("warning", "សូមចូលក្នុងប្រព័ន្ធ", "សូមចូលក្នុងប្រព័ន្ធមុននឹងស្កែនវត្តមាន!");
+                                return;
+                              }
+                              if (!isWithinGeofence) {
+                                triggerDialog(
+                                  "error",
+                                  "ការស្កែនត្រូវបានបដិសេធ",
+                                  `លោកអ្នកស្ថិតនៅចម្ងាយ ${calculatedDistance.toLocaleString()} ម៉ែត្រ ឆ្ងាយពីក្រុមហ៊ុន។ សូមកំណត់ទូរស័ព្ទដៃ 'នៅការិយាល័យ' (Simulate GPS: office) ជាមុនសិន!`
+                                );
+                                return;
+                              }
+                              
+                              const hasCheckedInToday = logs.some(
+                                (l) =>
+                                  l.id === loggedInEmployee.id &&
+                                  l.type === "Check-In" &&
+                                  l.time.startsWith(new Date().toISOString().split("T")[0])
+                              );
+                              const typeToDo = hasCheckedInToday ? "Check-Out" : "Check-In";
+                              executeEmployeeQRScanner(loggedInEmployee, typeToDo, "QR Code", `${calculatedDistance}m`);
+                            }}
+                            className="bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white text-[9.5px] font-bold px-3 py-1.5 rounded-xl transition-all shadow-md shadow-emerald-950/40 cursor-pointer flex items-center justify-center gap-1 mx-auto border border-emerald-400/25"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                            ស្កែន QR ក្រុមហ៊ុនសិប្បនិម្មិត
+                          </button>
+                        </div>
                       </div>
                     )}
 
@@ -1511,6 +1628,129 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {/* --- EMPLOYEE DIGITAL QR BADGE OVERLAY --- */}
+            <AnimatePresence>
+              {isQRBadgeOpen && loggedInEmployee && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.18 }}
+                  className="absolute inset-x-0 bottom-0 top-12 bg-slate-950/98 z-50 rounded-b-[38px] flex flex-col justify-between p-5 font-sans overflow-y-auto"
+                  style={{ scrollbarWidth: "none" }}
+                >
+                  {/* Header bar */}
+                  <div className="flex justify-between items-center pb-2.5 border-b border-slate-900/80">
+                    <div className="flex items-center space-x-2">
+                      <div className="bg-white p-0.5 rounded-lg flex items-center justify-center">
+                        <img src={umeLogo} className="w-5 h-5 object-contain" alt="Logo" referrerPolicy="no-referrer" />
+                      </div>
+                      <span className="text-[10px] font-bold text-white tracking-tight uppercase">សាកលវិទ្យាល័យ UME</span>
+                    </div>
+                    <button
+                      onClick={() => setIsQRBadgeOpen(false)}
+                      className="p-1 rounded-full bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Badge Card Wrapper */}
+                  <div className="my-auto space-y-4 text-center">
+                    <div className="bg-gradient-to-b from-indigo-950/80 to-slate-900 p-5 rounded-3xl border border-indigo-500/20 shadow-xl max-w-[280px] mx-auto relative overflow-hidden space-y-3">
+                      {/* Decorative Accent Ring */}
+                      <div className="absolute -top-12 -right-12 w-24 h-24 bg-emerald-500/10 rounded-full blur-xl pointer-events-none"></div>
+
+                      {/* Top ID banner tag */}
+                      <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] px-2.5 py-0.5 rounded-full font-bold tracking-wider font-mono">
+                        ID: {loggedInEmployee.id}
+                      </span>
+
+                      {/* Avatar */}
+                      <div className="mx-auto w-16 h-16 rounded-full bg-slate-850 p-1 border border-indigo-400/30 shadow-md">
+                        <img
+                          src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${loggedInEmployee.avatar}`}
+                          className="w-full h-full rounded-full"
+                          alt="Avatar"
+                        />
+                      </div>
+
+                      {/* Details */}
+                      <div>
+                        <h4 className="text-xs font-extrabold text-white">{loggedInEmployee.name}</h4>
+                        <p className="text-[9.5px] text-indigo-300 font-medium">{loggedInEmployee.position}</p>
+                        <p className="text-[9px] text-slate-400">ផ្នែក៖ {loggedInEmployee.dept}</p>
+                      </div>
+
+                      {/* QR Code SVG container */}
+                      <div className="bg-white p-3 rounded-2xl inline-block shadow-lg mx-auto relative">
+                        <QRCodeSVG
+                          value={JSON.stringify({
+                            type: "ume_attendance",
+                            id: loggedInEmployee.id,
+                            name: loggedInEmployee.name,
+                            dept: loggedInEmployee.dept,
+                          })}
+                          size={110}
+                          level="H"
+                          includeMargin={false}
+                        />
+                        {/* Tiny logo centerpiece inside QR */}
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <div className="bg-white p-0.5 rounded shadow border border-slate-150">
+                            <img src={umeLogo} className="w-5 h-5 object-contain" alt="" referrerPolicy="no-referrer" />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Security rotation notice */}
+                      <div className="text-[8.5px] text-slate-400 flex items-center justify-center gap-1">
+                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                        សន្តិសុខ៖ QR Code អនុញ្ញាតវត្តមានអូតូ
+                      </div>
+                    </div>
+
+                    {/* Simulation Assist: Trigger instant scan on Gate Scanner */}
+                    <div className="space-y-1.5 p-2 bg-indigo-950/30 rounded-2xl border border-indigo-900/30">
+                      <p className="text-[9.5px] text-slate-300 font-bold tracking-wider">
+                        សាកល្បងស្កែនកូដ QR ផ្ទាល់ខ្លួន
+                      </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => {
+                            executeEmployeeQRScanner(loggedInEmployee, "Check-In", "QR Code", "0m");
+                            setIsQRBadgeOpen(false);
+                          }}
+                          className="bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white font-bold text-[9px] py-2 rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer shadow-sm"
+                        >
+                          <LogIn className="w-3.5 h-3.5" />
+                          ស្កែនចូល (Check-In)
+                        </button>
+                        <button
+                          onClick={() => {
+                            executeEmployeeQRScanner(loggedInEmployee, "Check-Out", "QR Code", "0m");
+                            setIsQRBadgeOpen(false);
+                          }}
+                          className="bg-rose-500 hover:bg-rose-600 active:bg-rose-700 text-white font-bold text-[9px] py-2 rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer shadow-sm"
+                        >
+                          <LogOut className="w-3.5 h-3.5" />
+                          ស្កែនចេញ (Check-Out)
+                        </button>
+                      </div>
+                      <p className="text-[8px] text-slate-500 text-center leading-relaxed font-sans">
+                        (ប្រព័ន្ធនឹងបញ្ជូនទិន្នន័យ QR ទៅប្រព័ន្ធវត្តមានស្វ័យប្រវត្ត)
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Footer brand */}
+                  <div className="text-center text-[8.5px] text-slate-600 pt-1.5 border-t border-slate-900">
+                    Smart QR-ID Card • Secure Terminal Interface
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Simulated Phone Bar Home swipe line */}
             <div className="pb-1 pt-3.5 flex justify-center z-10 border-t border-slate-900">
@@ -1730,6 +1970,157 @@ export default function App() {
                       <Send className="w-3.5 h-3.5" />
                       ផ្ញើសារសាកល្បងទៅ Telegram
                     </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* --- BENTO CARD: SYSTEM QR CODE COMPONENTS --- */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
+                {/* CARD A: Office Daily QR Code Representation */}
+                <div className="bg-white p-5 rounded-2xl shadow-xs border border-slate-200/60 space-y-4 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-2.5 border-b border-slate-100 pb-3">
+                      <QrCode className="w-5 h-5 text-indigo-650 text-indigo-600" />
+                      <h2 className="font-bold text-slate-800 text-sm">កូដ QR វត្តមានប្រចាំថ្ងៃរបស់ក្រុមហ៊ុន (Office Presence QR)</h2>
+                    </div>
+
+                    <p className="text-xs text-slate-500 leading-relaxed font-sans">
+                      នេះជា QR Code វត្តមានផ្លូវការប្រចាំថ្ងៃរបស់ក្រុមហ៊ុន។ បុគ្គលិកអាចប្រើមុខងារ <b className="text-slate-800">"ស្កែន QR Code"</b> នៅលើកម្មវិធីទូរស័ព្ទរបស់ពួកគេ ដើម្បីស្កែនយកវត្តមានដោយផ្ទាល់។
+                    </p>
+
+                    <div className="flex flex-col items-center justify-center p-4 bg-slate-50 rounded-2xl border border-slate-200/50 max-w-[240px] mx-auto relative group shadow-inner">
+                      <QRCodeSVG
+                        value={JSON.stringify({
+                          company: "UME_UNIVERSITY",
+                          location: "Kampong Cham",
+                          lat: office.lat,
+                          lng: office.lng,
+                          createdDate: new Date().toISOString().split("T")[0],
+                        })}
+                        size={150}
+                        level="Q"
+                      />
+                      {/* Logo over top center of QR code */}
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="bg-white p-1 rounded-lg shadow-md border border-slate-100">
+                          <img src={umeLogo} className="w-7 h-7 object-contain" alt="" referrerPolicy="no-referrer" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-center font-mono text-[10px] text-slate-400">
+                      ID: UME-CORP-SECURE • Valid Until Today
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100">
+                    <div className="text-[11px] text-indigo-700 bg-indigo-50 border border-indigo-100 p-2.5 rounded-xl flex items-start gap-1.5 leading-relaxed font-sans mt-2">
+                      <Info className="w-4 h-4 flex-shrink-0 text-indigo-500 mt-0.5" />
+                      <span>
+                        អ្នកគ្រប់គ្រងអាចធ្វើការបោះពុម្ព ឬបង្ហាញ QR Code នេះនៅលើអេក្រង់ធំនៅច្រកចូល ដើម្បីឱ្យបុគ្គលិកទាំងអស់ស្កែន។
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* CARD B: Tablet/Gate Scanner Simulator at Front Desk */}
+                <div className="bg-white p-5 rounded-2xl shadow-xs border border-slate-200/60 space-y-4 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-2.5 border-b border-slate-100 pb-3">
+                      <IdCard className="w-5 h-5 text-emerald-600" />
+                      <h2 className="font-bold text-slate-800 text-sm">ម៉ាស៊ីនស្កែន QR នៅច្រកទ្វារក្រុមហ៊ុន (Gate Scanner Simulator)</h2>
+                    </div>
+
+                    <p className="text-xs text-slate-500 leading-relaxed font-sans">
+                      ត្រួតពិនិត្យ និងស្កេនកាត QR កូដរបស់បុគ្គលិកនៅពេលពួកគេដើរកាត់ច្រកទ្វារដោយបង្ហាញ <b className="text-slate-800">"កាតបុគ្គលិក QR"</b> លើទូរស័ព្ទរបស់ពួកគេ។
+                    </p>
+
+                    {/* Integrated gate interactive scanning card simulator */}
+                    <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl text-white space-y-3 shadow-inner relative overflow-hidden font-sans">
+                      {/* Scanning laser visual decoration */}
+                      <div className="absolute left-0 right-0 h-[1.5px] bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] z-10 animate-bounce top-2 bottom-2" style={{ animationDuration: "3.5s" }} />
+
+                      <div className="flex justify-between items-center bg-slate-950 p-2 rounded-xl border border-slate-900 text-xs text-slate-400 font-mono">
+                        <span className="flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span> ស្ថានភាពម៉ាស៊ីន៖ រង់ចាំស្កែន
+                        </span>
+                        <span>v1.8</span>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                          ១. ជ្រើសរើសប្រភេទសកម្មភាព៖
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => setGateScanType("Check-In")}
+                            className={`py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                              gateScanType === "Check-In"
+                                ? "bg-emerald-500 text-white shadow-sm shadow-emerald-950/40"
+                                : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                            }`}
+                          >
+                            <LogIn className="w-3.5 h-3.5" />
+                            ចូលធ្វើការ (In)
+                          </button>
+                          <button
+                            onClick={() => setGateScanType("Check-Out")}
+                            className={`py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                              gateScanType === "Check-Out"
+                                ? "bg-rose-500 text-white shadow-sm shadow-rose-950/40"
+                                : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                            }`}
+                          >
+                            <LogOut className="w-3.5 h-3.5" />
+                            ចេញការងារ (Out)
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                          ២. ជ្រើសរើសបុគ្គលិកដើម្បីស្កែនសាកល្បង៖
+                        </label>
+                        <div className="flex gap-2">
+                          <select
+                            value={selectedGateEmpId}
+                            onChange={(e) => setSelectedGateEmpId(e.target.value)}
+                            className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 flex-1"
+                          >
+                            <option value="">-- ជ្រើសរើសបុគ្គលិក --</option>
+                            {employees.map((e) => (
+                              <option key={e.id} value={e.id}>
+                                {e.name} ({e.dept} - {e.id})
+                              </option>
+                            ))}
+                          </select>
+
+                          <button
+                            onClick={() => {
+                              if (!selectedGateEmpId) {
+                                triggerDialog("warning", "សូមជ្រើសរើសបុគ្គលិក", "សូមជ្រើសរើសបុគ្គលិកម្នាក់ក្នុងតារាងជាមុនសិន!");
+                                return;
+                              }
+                              const empObj = employees.find((e) => e.id === selectedGateEmpId);
+                              if (empObj) {
+                                executeEmployeeQRScanner(empObj, gateScanType, "QR Code", "0m");
+                              }
+                            }}
+                            className="bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition duration-150 shadow shadow-emerald-500/20 cursor-pointer"
+                          >
+                            ធ្វើការស្កែន
+                          </button>
+                        </div>
+                        <p className="text-[9px] text-slate-500 font-sans">
+                          * ត្រាប់តាមការនាំយកទូរស័ព្ទរបស់បុគ្គលិកទៅដាក់ចំពោះមុខឧបករណ៍ស្កេននេះ។
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] text-emerald-600 bg-emerald-50 border border-emerald-100 p-2.5 rounded-xl flex items-center gap-1.5 leading-tight font-sans mt-2">
+                    <Check className="w-4 h-4 flex-shrink-0 text-emerald-500" />
+                    <span>ម៉ាស៊ីនស្កែនច្រកទ្វារធ្វើបច្ចុប្បន្នភាពភ្លាមៗតាម Local network។</span>
                   </div>
                 </div>
               </div>
