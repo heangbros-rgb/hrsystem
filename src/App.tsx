@@ -140,6 +140,13 @@ export default function App() {
   const [newEmpPassword, setNewEmpPassword] = useState("");
   const [newEmpAvatar, setNewEmpAvatar] = useState("Felix");
 
+  // Bulk Employee Import modal state
+  const [isBulkImportModalOpen, setIsBulkImportModalOpen] = useState(false);
+  const [importOptionDuplicate, setImportOptionDuplicate] = useState<"skip" | "overwrite">("skip");
+  const [parsedImportEmployees, setParsedImportEmployees] = useState<Employee[]>([]);
+  const [rawTextToImport, setRawTextToImport] = useState("");
+  const [importFileName, setImportFileName] = useState("");
+
   // Monthly Report modal state
   const [isMonthlyReportModalOpen, setIsMonthlyReportModalOpen] = useState(false);
   const [selectedReportMonth, setSelectedReportMonth] = useState(() => {
@@ -857,6 +864,205 @@ export default function App() {
     triggerDialog("success", "បង្កើតគណនីបុគ្គលិកជោគជ័យ", `បុគ្គលិកឈ្មោះ ${created.name} ត្រូវបានបញ្ចូលទៅក្នុងបញ្ជីកម្មវិធីរួចរាល់ និងអាចប្រើប្រាស់អត្តលេខដើម្បីស្កែនវត្តមានបាន។`);
   };
 
+  // --- BULK EMPLOYEES IMPORT HELPERS ---
+  const handleDownloadImportTemplate = () => {
+    const templateData = [
+      {
+        "អត្តលេខ (ID)": "EMP-999",
+        "ឈ្មោះបុគ្គលិក (Name)": "លី ដេវីត",
+        "ផ្នែក (Department)": "IT",
+        "តួនាទី (Position)": "React Developer",
+        "លេខកូដសម្ងាត់ (Password)": "1234",
+        "រូបតំណាង (Avatar Seed)": "Milo"
+      },
+      {
+        "អត្តលេខ (ID)": "EMP-888",
+        "ឈ្មោះបុគ្គលិក (Name)": "សៅ រម្យនា",
+        "ផ្នែក (Department)": "HR",
+        "តួនាទី (Position)": "HR Recruiter",
+        "លេខកូដសម្ងាត់ (Password)": "4321",
+        "រូបតំណាង (Avatar Seed)": "Aneka"
+      }
+    ];
+    
+    try {
+      const worksheet = XLSX.utils.json_to_sheet(templateData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Employee Template");
+      
+      const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([excelBuffer], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "smart_attendance_employees_template.xlsx");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      triggerDialog("success", "ទាញយកគំរូជោគជ័យ", "ឯកសារគំរូ Excel សម្រាប់ការបញ្ចូលឈ្មោះបុគ្គលិកត្រូវបានទាញយក។");
+    } catch (err: any) {
+      triggerDialog("error", "កំហុសទាញយកគំរូ", `មិនអាចទាញយកគំរូបានទេ៖ ${err.message}`);
+    }
+  };
+
+  const handleExcelFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstream = evt.target?.result;
+        const workbook = XLSX.read(bstream, { type: "binary" });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawJson = XLSX.utils.sheet_to_json<any>(worksheet);
+
+        if (rawJson.length === 0) {
+          triggerDialog("warning", "គ្មានទិន្នន័យ", "ឯកសារដែលអ្នកបានជ្រើសរើសមិនមានទិន្នន័យទេ។");
+          return;
+        }
+
+        const parsed: Employee[] = rawJson.map((row) => {
+          const idKey = Object.keys(row).find(k => k.toLowerCase().includes("id") || k.includes("អត្តលេខ") || k.toLowerCase().includes("code"));
+          const nameKey = Object.keys(row).find(k => k.toLowerCase().includes("name") || k.includes("ឈ្មោះ"));
+          const deptKey = Object.keys(row).find(k => k.toLowerCase().includes("dept") || k.toLowerCase().includes("department") || k.includes("ផ្នែក"));
+          const posKey = Object.keys(row).find(k => k.toLowerCase().includes("position") || k.toLowerCase().includes("role") || k.includes("តួនាទី"));
+          const passKey = Object.keys(row).find(k => k.toLowerCase().includes("password") || k.toLowerCase().includes("pass") || k.includes("កូដ") || k.includes("សម្ងាត់"));
+          const avatarKey = Object.keys(row).find(k => k.toLowerCase().includes("avatar") || k.includes("តំណាង") || k.includes("រូប"));
+
+          const id = idKey && row[idKey] ? String(row[idKey]).trim() : `EMP-${Math.floor(Math.random() * 900) + 100}`;
+          const name = nameKey && row[nameKey] ? String(row[nameKey]).trim() : "បុគ្គលិកថ្មី";
+          const dept = deptKey && row[deptKey] ? String(row[deptKey]).trim() : "General";
+          const position = posKey && row[posKey] ? String(row[posKey]).trim() : "Staff";
+          const password = passKey && row[passKey] ? String(row[passKey]).trim() : "1234";
+          const avatar = avatarKey && row[avatarKey] ? String(row[avatarKey]).trim() : "Felix";
+
+          return { id, name, dept, position, password, avatar };
+        });
+
+        setParsedImportEmployees(parsed);
+        triggerDialog("success", "វិភាគឯកសារជោគជ័យ", `បានរកឃើញទិន្នន័យបុគ្គលិកចំនួន ${parsed.length} នាក់ពេញលេញ។`);
+      } catch (err: any) {
+        triggerDialog("error", "បរាជ័យក្នុងការបកស្រាយឯកសារ", `មានបញ្ហាបកស្រាយឯកសារ Excel៖ ${err.message}`);
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const handleParseRawTextToImport = () => {
+    if (!rawTextToImport.trim()) {
+      triggerDialog("warning", "ខ្វះទិន្នន័យ", "សូមវាយបញ្ចូល ឬបិទភ្ជាប់ (Paste) ទិន្នន័យជាមុនសិន។");
+      return;
+    }
+
+    try {
+      const lines = rawTextToImport.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+      if (lines.length === 0) {
+        triggerDialog("warning", "គ្មានទិន្នន័យ", "សូមវាយបញ្ចូលទិន្នន័យដែលមានរបៀបរៀបរយ។");
+        return;
+      }
+
+      let startIndex = 0;
+      const firstLineLower = lines[0].toLowerCase();
+      if (
+        firstLineLower.includes("id") || firstLineLower.includes("name") || 
+        firstLineLower.includes("អត្តលេខ") || firstLineLower.includes("ឈ្មោះ") ||
+        firstLineLower.includes("department") || firstLineLower.includes("ផ្នែក") ||
+        firstLineLower.includes("position") || firstLineLower.includes("តួនាទី")
+      ) {
+        startIndex = 1;
+      }
+
+      const parsed: Employee[] = [];
+      for (let i = startIndex; i < lines.length; i++) {
+        const line = lines[i];
+        let parts = line.split("\t");
+        if (parts.length < 2) {
+          parts = line.split(",");
+        }
+        if (parts.length < 2) {
+          parts = line.split(";");
+        }
+
+        if (parts.length >= 2) {
+          const id = parts[0] ? parts[0].trim() : `EMP-${Math.floor(Math.random() * 900) + 100}`;
+          const name = parts[1] ? parts[1].trim() : "បុគ្គលិកថ្មី";
+          const dept = parts[2] ? parts[2].trim() : "General";
+          const position = parts[3] ? parts[3].trim() : "Staff";
+          const password = parts[4] ? parts[4].trim() : "1234";
+          const avatar = parts[5] ? parts[5].trim() : "Felix";
+
+          parsed.push({ id, name, dept, position, password, avatar });
+        }
+      }
+
+      if (parsed.length === 0) {
+        triggerDialog("error", "បរាជ័យក្នុងការវិភាគ", "ទម្រង់ទិន្នន័យដែលបានបញ្ចូលគឺមិនត្រឹមត្រូវឡើយ។ សូមពិនិត្យមើលគំរូ។");
+        return;
+      }
+
+      setParsedImportEmployees(parsed);
+      triggerDialog("success", "វិភាគជោគជ័យ", `បានរកឃើញបុគ្គលិកចំនួន ${parsed.length} នាក់ពីអត្ថបទដែលអ្នកបានបិទភ្ជាប់។`);
+    } catch (err: any) {
+      triggerDialog("error", "កំហុសវិភាគ", `មានបញ្ហាក្នុងការបកស្រាយ៖ ${err.message}`);
+    }
+  };
+
+  const handleExecuteBulkImport = () => {
+    if (parsedImportEmployees.length === 0) {
+      triggerDialog("warning", "គ្មានទិន្នន័យនាំចូល", "សូមជ្រើសរើសឯកសារ ឬវិភាគអត្ថបទជាមុនសិន។");
+      return;
+    }
+
+    let addedCount = 0;
+    let updatedCount = 0;
+    let skippedCount = 0;
+
+    setEmployees((currentEmployees) => {
+      const updatedList = [...currentEmployees];
+
+      parsedImportEmployees.forEach((newEmp) => {
+        const existingIndex = updatedList.findIndex(
+          (emp) => emp.id.toLowerCase() === newEmp.id.toLowerCase()
+        );
+
+        if (existingIndex !== -1) {
+          if (importOptionDuplicate === "overwrite") {
+            updatedList[existingIndex] = {
+              ...updatedList[existingIndex],
+              name: newEmp.name || updatedList[existingIndex].name,
+              dept: newEmp.dept || updatedList[existingIndex].dept,
+              position: newEmp.position || updatedList[existingIndex].position,
+              password: newEmp.password || updatedList[existingIndex].password,
+              avatar: newEmp.avatar || updatedList[existingIndex].avatar,
+            };
+            updatedCount++;
+          } else {
+            skippedCount++;
+          }
+        } else {
+          updatedList.push(newEmp);
+          addedCount++;
+        }
+      });
+
+      return updatedList;
+    });
+
+    triggerDialog(
+      "success",
+      "ការនាំចូលបានសម្រេច",
+      `បានបញ្ចូលបុគ្គលិកថ្មី ${addedCount} នាក់ និងកែប្រែដោយជោគជ័យ ${updatedCount} នាក់ (បានរំលងចំនួន ${skippedCount} នាក់ដែលមានអត្តលេខស្ទួន)។`
+    );
+
+    setIsBulkImportModalOpen(false);
+    setParsedImportEmployees([]);
+    setRawTextToImport("");
+    setImportFileName("");
+  };
+
   // Quick stats computed logic
   const statTotal = logs.length;
   const statOnTime = logs.filter((l) => l.status === "ទាន់ម៉ោង").length;
@@ -1535,13 +1741,22 @@ export default function App() {
                     <Plus className="w-5 h-5 text-indigo-655 text-indigo-600" />
                     <h2 className="font-bold text-slate-800 text-sm">គ្រប់គ្រងបញ្ជីឈ្មោះបុគ្គលិកទាំងអស់</h2>
                   </div>
-                  <button
-                    onClick={() => setIsNewEmpModalOpen(true)}
-                    className="bg-indigo-950 hover:bg-slate-900 text-white text-xs px-3.5 py-2 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    បន្ថែមបុគ្គលិកថ្មី
-                  </button>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      onClick={() => setIsBulkImportModalOpen(true)}
+                      className="bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 text-indigo-700 text-[11px] px-3.5 py-2 rounded-xl font-bold transition flex items-center gap-1.5 border border-indigo-100 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5 rotate-180" />
+                      នាំចូលច្រើន (Bulk Import)
+                    </button>
+                    <button
+                      onClick={() => setIsNewEmpModalOpen(true)}
+                      className="bg-indigo-950 hover:bg-slate-900 text-white text-[11px] px-3.5 py-2 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      បន្ថែមបុគ្គលិកថ្មី
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 max-h-60 overflow-y-auto pr-1">
@@ -2002,6 +2217,229 @@ export default function App() {
                   className="bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-600 text-xs px-5 py-2.5 rounded-xl font-bold transition duration-150 cursor-pointer"
                 >
                   បិទវីនដូ
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* --- BULK EMPLOYEE IMPORT DIALOG --- */}
+      <AnimatePresence>
+        {isBulkImportModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setIsBulkImportModalOpen(false);
+                setParsedImportEmployees([]);
+              }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs"
+            />
+
+            {/* Modal Body */}
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative z-10 border border-slate-100 flex flex-col max-h-[85vh]"
+            >
+              <div className="flex justify-between items-center border-b border-slate-100 pb-3.5">
+                <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                  <Users className="w-5 h-5 text-indigo-600" />
+                  នាំចូលព័ត៌មានបុគ្គលិកថ្មីសម្រាប់ចំនួនច្រើន (Bulk Import)
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsBulkImportModalOpen(false);
+                    setParsedImportEmployees([]);
+                  }}
+                  className="text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Instructions and Template download */}
+              <div className="flex items-start justify-between bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100 text-xs leading-relaxed text-indigo-950">
+                <div className="space-y-1">
+                  <span className="font-bold block text-indigo-950 text-[13px]">💡 ការណែនាំ៖</span>
+                  <p>លោកអ្នកអាចទាញយកឯកសារគំរូ Excel បំពេញបញ្ជីឈ្មោះបុគ្គលិក រួចបង្ហោះចូលទៅក្នុងប្រព័ន្ធវិញ ឬអាចបិទភ្ជាប់ (Copy-Paste) ជាអត្ថបទខាងក្រោមបាន។</p>
+                </div>
+                <button
+                  onClick={handleDownloadImportTemplate}
+                  className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] px-3.5 py-2 rounded-xl font-bold transition flex items-center gap-1 shadow-sm cursor-pointer ml-3"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  ទាញយកឯកសារគំរូ
+                </button>
+              </div>
+
+              {/* Import Options / Tabs */}
+              <div className="space-y-3.5 flex-1 overflow-y-auto pr-1">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Options 1: File Uploader */}
+                  <div className="border border-slate-200/80 rounded-2xl p-4 space-y-3 bg-white">
+                    <span className="block text-xs font-bold text-slate-700">ជម្រើសទី១៖ នាំចូលតាមរយៈឯកសារ (Excel/CSV)</span>
+                    <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-indigo-400 transition relative">
+                      <input
+                        type="file"
+                        accept=".xlsx, .xls, .csv"
+                        onChange={handleExcelFileChange}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                      />
+                      <Download className="w-8 h-8 text-slate-400 mx-auto mb-2 rotate-180" />
+                      <span className="block text-[11px] font-bold text-slate-600 mb-0.5">ជ្រើសរើស ឬអូសឯកសារទម្លាក់ទីនេះ</span>
+                      <span className="block text-[10px] text-slate-400">គាំទ្រត្រឹម .xlsx, .xls, .csv</span>
+                    </div>
+
+                    {importFileName && (
+                      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex items-center justify-between text-xs font-medium text-slate-700">
+                        <span className="truncate max-w-[80%]">📁 {importFileName}</span>
+                        <button
+                          onClick={() => {
+                            setImportFileName("");
+                            setParsedImportEmployees([]);
+                          }}
+                          className="text-rose-500 hover:text-rose-700 text-[10px]"
+                        >
+                          លុបវិញ
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Option 2: Paste Raw Text */}
+                  <div className="border border-slate-200/80 rounded-2xl p-4 space-y-3 bg-white flex flex-col">
+                    <span className="block text-xs font-bold text-slate-700">ជម្រើសទី២៖ បិទភ្ជាប់ជាអត្ថបទ (Paste Text)</span>
+                    <textarea
+                      value={rawTextToImport}
+                      onChange={(e) => setRawTextToImport(e.target.value)}
+                      placeholder="ឧ. EMP-101, គង់ សុភ័ក្រ, IT, Developer, 1234, Felix&#10;EMP-102, ហេង សាលី, HR, Recruiter, 4321, Aneka"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono resize-none h-[95px]"
+                    />
+                    <button
+                      onClick={handleParseRawTextToImport}
+                      className="w-full bg-indigo-50 hover:bg-indigo-150 text-indigo-700 text-xs py-2 rounded-xl font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      វិភាគអត្ថបទ (Analyze Paste)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Duplicate logic selector */}
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                  <div>
+                    <span className="font-bold text-slate-700 block mb-0.5">វិធានការណ៍នៅពេលជួប អត្តលេខបុគ្គលិក ដូចគ្នា</span>
+                    <p className="text-[10px] text-slate-400">ប្រព័ន្ធនឹងផ្ទៀងផ្ទាត់លេខសម្គាល់គណនី (Employee ID)</p>
+                  </div>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-1.5 font-semibold text-slate-700 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="importOptionMatch"
+                        checked={importOptionDuplicate === "skip"}
+                        onChange={() => setImportOptionDuplicate("skip")}
+                        className="text-indigo-600 focus:ring-indigo-500"
+                      />
+                      រំលងគណនីចាស់ (Skip)
+                    </label>
+                    <label className="flex items-center gap-1.5 font-semibold text-slate-700 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="importOptionMatch"
+                        checked={importOptionDuplicate === "overwrite"}
+                        onChange={() => setImportOptionDuplicate("overwrite")}
+                        className="text-indigo-600 focus:ring-indigo-500"
+                      />
+                      សរសេរជាន់លើ (Overwrite)
+                    </label>
+                  </div>
+                </div>
+
+                {/* Preview block table */}
+                {parsedImportEmployees.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center px-1">
+                      <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <Users className="w-3.5 h-3.5 text-indigo-600" />
+                        បញ្ជីត្រៀមនាំចូលសរុប៖ {parsedImportEmployees.length} នាក់
+                      </span>
+                      <button
+                        onClick={() => setParsedImportEmployees([])}
+                        className="text-rose-500 hover:text-rose-700 text-[10px] font-semibold"
+                      >
+                        សម្អាតបញ្ជី preview
+                      </button>
+                    </div>
+
+                    <div className="border border-slate-200 rounded-xl overflow-x-auto max-h-40 bg-slate-50">
+                      <table className="w-full text-left border-collapse text-[11px]">
+                        <thead>
+                          <tr className="bg-slate-100 text-slate-500 font-bold border-b border-slate-200">
+                            <th className="p-2">អត្តលេខ</th>
+                            <th className="p-2">ឈ្មោះបុគ្គលិក</th>
+                            <th className="p-2">ផ្នែក (Dept)</th>
+                            <th className="p-2">តួនាទី (Position)</th>
+                            <th className="p-2">លេខកូដសម្ងាត់</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {parsedImportEmployees.map((emp, index) => {
+                            const isConflict = employees.some(e => e.id.toLowerCase() === emp.id.toLowerCase());
+                            return (
+                              <tr key={index} className="hover:bg-indigo-50/20">
+                                <td className="p-2 font-mono font-bold text-slate-700 flex items-center gap-1">
+                                  {emp.id}
+                                  {isConflict && (
+                                    <span className="inline-block bg-amber-100 text-amber-700 px-1 py-0.2 rounded text-[8px] font-bold">
+                                      {importOptionDuplicate === "skip" ? "Skip" : "Overwrite"}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-2 font-medium text-slate-800">{emp.name}</td>
+                                <td className="p-2 text-indigo-700 font-bold">{emp.dept}</td>
+                                <td className="p-2 text-slate-500">{emp.position}</td>
+                                <td className="p-2 font-mono text-slate-400">{emp.password}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Foot actions */}
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsBulkImportModalOpen(false);
+                    setParsedImportEmployees([]);
+                  }}
+                  className="bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-600 text-xs px-5 py-2.5 rounded-xl font-bold transition duration-150 cursor-pointer"
+                >
+                  បោះបង់
+                </button>
+                <button
+                  type="button"
+                  disabled={parsedImportEmployees.length === 0}
+                  onClick={handleExecuteBulkImport}
+                  className={`text-white text-xs px-5 py-2.5 rounded-xl font-bold transition duration-150 flex items-center gap-1 cursor-pointer shadow-md ${
+                    parsedImportEmployees.length === 0
+                      ? "bg-slate-350 cursor-not-allowed bg-slate-300"
+                      : "bg-indigo-950 hover:bg-slate-900 active:bg-slate-950 shadow-indigo-950/10"
+                  }`}
+                >
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  អនុវត្តនាំចូលបុគ្គលិក ({parsedImportEmployees.length})
                 </button>
               </div>
             </motion.div>
